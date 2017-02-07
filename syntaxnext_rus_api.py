@@ -52,6 +52,8 @@ custom_file_path = '/root/models/syntaxnet/bazel-bin/syntaxnet/parser_eval.runfi
 orig_file_path = '/root/models/syntaxnet/syntaxnet/models/parsey_universal/context.pbtxt'
 shutil.copyfile(custom_file_path, orig_file_path)
 
+################################################################################
+
 import time
 import tempfile
 import tensorflow as tf
@@ -67,27 +69,94 @@ from syntaxnet import structured_graph_builder
 from syntaxnet.ops import gen_parser_ops
 from syntaxnet import task_spec_pb2
 
-import StringIO
-import select
 
+class ProcessorSyntaxNetConfig(object):
+  def __init__(self, 
+    beam_size, 
+    max_steps, 
+    arg_prefix, 
+    slim_model, 
+    task_context_file, 
+    resource_dir,
+    model_path, 
+    batch_size, 
+    hidden_layer_str,
+    custom_file_path,
+    input_str,
+    variable_scope,
+    flush_input = False):
 
-beam_size = 8
-max_steps = 1000
-arg_prefix = 'brain_morpher'
-slim_model = True
-task_context_file = '/root/models/syntaxnet/syntaxnet/models/parsey_universal/context.pbtxt'
-resource_dir = '/root/models/syntaxnet/syntaxnet/models/Russian-SynTagRus'
-model_path = os.path.join(resource_dir, 'morpher-params')
+    self.beam_size = beam_size
+    self.max_steps = max_steps
+    self.arg_prefix = arg_prefix
+    self.slim_model = slim_model
+    self.task_context_file = task_context_file
+    self.resource_dir = resource_dir
+    self.model_path = model_path
+    self.batch_size = batch_size
+    self.hidden_layer_str = hidden_layer_str
 
-custom_file_path = '/root/models/syntaxnet/bazel-bin/syntaxnet/parser_eval.runfiles/__main__/syntaxnet/api/1.txt'
+    self.custom_file_path = custom_file_path
+    self.input_str = input_str
+    self.variable_scope = variable_scope
+    self.flush_input = flush_input
 
-input_str = 'custom_file'
 #input_str = 'stdin-conll'
 #input_str = 'stdin'
 
-output_str = 'stdout-conll'
-batch_size = 1024
-hidden_layer_str = '64'
+task_context_file = '/root/models/syntaxnet/syntaxnet/models/parsey_universal/context.pbtxt'
+resource_dir = '/root/models/syntaxnet/syntaxnet/models/Russian-SynTagRus'
+custom_file_dir = '/root/models/syntaxnet/bazel-bin/syntaxnet/parser_eval.runfiles/__main__/syntaxnet/api/'
+
+
+CFG_MORPH_PARSER = ProcessorSyntaxNetConfig(
+  beam_size = 8,
+  max_steps = 1000,
+  arg_prefix = 'brain_morpher',
+  slim_model = True,
+  task_context_file = task_context_file,
+  resource_dir = resource_dir,
+  model_path = os.path.join(resource_dir, 'morpher-params'),
+  batch_size = 1024,
+  hidden_layer_str = '64',
+
+  custom_file_path = os.path.join(custom_file_dir, 'morpher.tmp'),
+  input_str = 'custom_file_morpher',
+  variable_scope = 'morpher',
+  flush_input = True)
+
+
+CFG_MORPH_TAGGER = ProcessorSyntaxNetConfig(
+  beam_size = 8,
+  max_steps = 1000,
+  arg_prefix = 'brain_tagger',
+  slim_model = True,
+  task_context_file = task_context_file,
+  resource_dir = resource_dir,
+  model_path = os.path.join(resource_dir, 'tagger-params'),
+  batch_size = 1024,
+  hidden_layer_str = '64',
+
+  custom_file_path = os.path.join(custom_file_dir, 'tagger.tmp'),
+  input_str = 'custom_file_tagger',
+  variable_scope = 'tagger')
+
+
+CFG_SYNTAX_PARSER = ProcessorSyntaxNetConfig(
+  beam_size = 8,
+  max_steps = 1000,
+  arg_prefix = 'brain_parser',
+  slim_model = True,
+  task_context_file = task_context_file,
+  resource_dir = resource_dir,
+  model_path = os.path.join(resource_dir, 'parser-params'),
+  batch_size = 1024,
+  hidden_layer_str = '512,512',
+
+  custom_file_path = os.path.join(custom_file_dir, 'parser.tmp'),
+  input_str = 'custom_file_parser',
+  variable_scope = 'synt_parser')
+
 
 def RewriteContext(task_context_file):
   context = task_spec_pb2.TaskSpec()
@@ -104,151 +173,85 @@ def RewriteContext(task_context_file):
     return fout.name
 
 
-def init(sess, task_context):
-  hidden_layer_sizes = map(int, hidden_layer_str.split(','))
-
-  feature_sizes, domain_sizes, embedding_dims, num_actions = sess.run(
-    gen_parser_ops.feature_size(task_context=task_context,
-      arg_prefix=arg_prefix))
-
-  parser = structured_graph_builder.StructuredGraphBuilder(
-          num_actions,
-          feature_sizes,
-          domain_sizes,
-          embedding_dims,
-          hidden_layer_sizes,
-          gate_gradients=True,
-          arg_prefix=arg_prefix,
-          beam_size=beam_size,
-          max_steps=max_steps)
-
-  parser.AddEvaluation(task_context,
-                       batch_size,
-                       corpus_name=input_str,
-                       evaluation_max_steps=max_steps)
-  
-  parser.AddSaver(slim_model)
-  sess.run(parser.inits.values())
-  parser.saver.restore(sess, model_path)
-  
-  return parser
-  
-
-
-
-
 class ProcessorSyntaxNet(object):
-  def __init__(self):
+  def __init__(self, cfg, read_stream):
     super(ProcessorSyntaxNet, self).__init__()
-    hidden_layer_sizes = map(int, hidden_layer_str.split(','))
 
-    feature_sizes, domain_sizes, embedding_dims, num_actions = sess.run(
-      gen_parser_ops.feature_size(task_context=task_context,
-        arg_prefix=arg_prefix))
+    self.parser_ = None
+    self.task_context_ = RewriteContext(task_context_file)
+    self.read_stream_ = read_stream
+    self.sess_ = tf.Session()
+    self.cfg_ = cfg
 
-    parser = structured_graph_builder.StructuredGraphBuilder(
-            num_actions,
-            feature_sizes,
-            domain_sizes,
-            embedding_dims,
-            hidden_layer_sizes,
-            gate_gradients=True,
-            arg_prefix=arg_prefix,
-            beam_size=beam_size,
-            max_steps=max_steps)
+    with open(self.cfg_.custom_file_path, 'w') as f:
+      pass
 
-    parser.AddEvaluation(task_context,
-                         batch_size,
-                         corpus_name=input_str,
-                         evaluation_max_steps=max_steps)
-    
-    parser.AddSaver(slim_model)
-    sess.run(parser.inits.values())
-    parser.saver.restore(sess, model_path)
-    
-    return parser
+    hidden_layer_sizes = map(int, self.cfg_.hidden_layer_str.split(','))
+
+    with tf.variable_scope(self.cfg_.variable_scope):
+      feature_sizes, domain_sizes, embedding_dims, num_actions = self.sess_.run(
+        gen_parser_ops.feature_size(task_context=self.task_context_,
+          arg_prefix=self.cfg_.arg_prefix))
+
+      self.parser_ = structured_graph_builder.StructuredGraphBuilder(
+              num_actions,
+              feature_sizes,
+              domain_sizes,
+              embedding_dims,
+              hidden_layer_sizes,
+              gate_gradients=True,
+              arg_prefix=self.cfg_.arg_prefix,
+              beam_size=self.cfg_.beam_size,
+              max_steps=self.cfg_.max_steps)
+
+      self.parser_.AddEvaluation(self.task_context_,
+        self.cfg_.batch_size,
+        corpus_name=self.cfg_.input_str,
+        evaluation_max_steps=self.cfg_.max_steps)
+      
+      self.parser_.AddSaver(self.cfg_.slim_model)
+      self.sess_.run(self.parser_.inits.values())
+      self.parser_.saver.restore(self.sess_, self.cfg_.model_path)
+
+      sys.stderr.flush()
+
+      #self.parse('1')
 
   def parse(self, raw_bytes):
-    with open(custom_file_path, 'w') as f:
-      pass 
+    if self.cfg_.flush_input:
+      with open(self.cfg_.custom_file_path, 'w') as f:
+        pass 
 
-    self._parse_impl(self.server.parser_, self.server.task_context_)
-    sys.stdout.flush()
+      self._parse_impl()
+      sys.stdout.flush()
     
-    with open(custom_file_path, 'a') as f:
-      f.write('\n' + data)
+    with open(self.cfg_.custom_file_path, 'a') as f:
+      f.write(raw_bytes)
       f.flush()
 
-    self._parse_impl(self.server.parser_, self.server.task_context_)
+    self._parse_impl()
     sys.stdout.flush()
 
-  def _parse_iml(self, parser, task_context):
-    tf_eval_epochs, tf_eval_metrics, tf_documents = sess.run([
-          parser.evaluation['epochs'],
-          parser.evaluation['eval_metrics'],
-          parser.evaluation['documents']
-     ])
+    result = self._read_all_stream(self.read_stream_)
+    return result
 
-    sink_documents = tf.placeholder(tf.string)
-    sink = gen_parser_ops.document_sink(sink_documents,
-                                        task_context=task_context,
-                                        corpus_name=output_str)
+  def _parse_impl(self):
+    with tf.variable_scope(self.cfg_.variable_scope):
+      tf_eval_epochs, tf_eval_metrics, tf_documents = self.sess_.run([
+            self.parser_.evaluation['epochs'],
+            self.parser_.evaluation['eval_metrics'],
+            self.parser_.evaluation['documents']
+       ])
 
-    sess.run(sink, feed_dict={sink_documents: tf_documents})
+      sink_documents = tf.placeholder(tf.string)
+      sink = gen_parser_ops.document_sink(sink_documents,
+                                          task_context=self.task_context_,
+                                          corpus_name='stdout-conll')
 
+      self.sess_.run(sink, feed_dict={sink_documents: tf_documents})
 
-class SyncHandler(SocketServer.BaseRequestHandler):
-  def read_incoming_request(self):
-    chunk = self.request.recv(1024)
-    data = str()
-    data += chunk
-    while '\n' not in chunk:
-      chunk = self.request.recv(1024)
-      data += chunk
-
-    return data
-
-  def handle(self):
-    logger.debug('Incoming request.')
-
-    data = self.read_incoming_request()
-
-    with open(custom_file_path, 'w') as f:
-      pass 
-
-    parse(self.server.parser_, self.server.task_context_)
-    
-    with open(custom_file_path, 'a') as f:
-      f.write('\n' + data)
-      f.flush()
-
-    sys.stdout.flush()
-
-    parse(self.server.parser_, self.server.task_context_)
-    sys.stdout.flush()
-
-    logger.debug('Parsing finished.')
-
-    reply = self.read_all_stream(self.server.read_stream_)
-    self.request.sendall(reply)
-
-  def read_all_stream(self, strm):
-    # pollster = select.poll()
-    # flags = select.POLLIN
-    # pollster.register(strm.fileno(), flags)
-
+  def _read_all_stream(self, strm):
     result = str()
-    # line = strm.read(100)
-    # result = line
-    # try:
-    #   while pollster.poll(0)[1]:
-    #     line = strm.read(1024)
-    #     if line:
-    #       result += line
-    #     else:
-    #       break
-    # except:
-    #   pass
 
     max_read = 1024
     while True:
@@ -260,20 +263,51 @@ class SyncHandler(SocketServer.BaseRequestHandler):
     return result
 
 
+class SyncHandler(SocketServer.BaseRequestHandler):
+  def handle(self):
+    logger.debug('Incoming request.')
+    data = self._read_incoming_request()
+
+    logger.debug('Morphological analysis...')
+    morph_result = self.server.morpher_.parse(data)
+    logger.debug('Done.')
+
+    logger.debug('Tagging...')
+    tagging_result = self.server.tagger_.parse(morph_result)
+    logger.debug('Done.')
+
+    logger.debug('Parsing...')
+    parsing_result = self.server.parser_.parse(tagging_result)
+    logger.debug('Done.')
+
+    result = parsing_result
+    self.request.sendall(result)
+
+  def _read_incoming_request(self):
+    chunk = self.request.recv(1024)
+    data = str()
+    data += chunk
+    while '\n' not in chunk:
+      chunk = self.request.recv(1024)
+      data += chunk
+
+    return data  
+
+
 def configure_stdout():
   read_stream, write_stream = os.pipe()
   os.dup2(write_stream, sys.stdout.fileno())
   return os.fdopen(read_stream)
 
 
-def main(sess):
+def main():
   sync_server = SocketServer.TCPServer(('0.0.0.0', 9999), SyncHandler)
-  sync_server.task_context_ = RewriteContext(task_context_file)
-  sync_server.parser_ = init(sess, sync_server.task_context_)
-  sync_server.read_stream_ = configure_stdout()
+  stdout_strm = configure_stdout()
+  sync_server.morpher_ = ProcessorSyntaxNet(CFG_MORPH_PARSER, stdout_strm)
+  sync_server.tagger_ = ProcessorSyntaxNet(CFG_MORPH_TAGGER, stdout_strm)
+  sync_server.parser_ = ProcessorSyntaxNet(CFG_SYNTAX_PARSER, stdout_strm)
   sync_server.serve_forever()  
 
 
 if __name__ == '__main__':
-  with tf.Session() as sess:
-    main(sess)
+  main()
