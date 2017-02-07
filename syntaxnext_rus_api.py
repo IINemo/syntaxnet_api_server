@@ -301,7 +301,24 @@ def configure_stdout():
 
 
 def main():
-  sync_server = SocketServer.TCPServer(('0.0.0.0', 9999), SyncHandler)
+  import argparse
+
+  parser = argparse.ArgumentParser(description = 
+                                     'Syntaxnet server.')
+    
+  parser.add_argument('--host', 
+                      required = True, 
+                      help = 'Accepted hosts',
+                      default = '0.0.0.0')
+
+  parser.add_argument('--port', 
+    required = True, 
+    help = 'Listening port',
+    default = 9999)
+
+  args = parser.parse_args()
+
+  sync_server = SocketServer.TCPServer((args.host, int(args.port)), SyncHandler)
   stdout_strm = configure_stdout()
   sync_server.morpher_ = ProcessorSyntaxNet(CFG_MORPH_PARSER, stdout_strm)
   sync_server.tagger_ = ProcessorSyntaxNet(CFG_MORPH_TAGGER, stdout_strm)
