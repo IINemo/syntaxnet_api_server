@@ -84,7 +84,9 @@ class ProcessorSyntaxNetConfig(object):
     custom_file_path,
     input_str,
     variable_scope,
-    flush_input = False):
+    init_line,
+    flush_input = False,
+    max_tmp_size = 524288000):
 
     self.beam_size = beam_size
     self.max_steps = max_steps
@@ -100,13 +102,13 @@ class ProcessorSyntaxNetConfig(object):
     self.input_str = input_str
     self.variable_scope = variable_scope
     self.flush_input = flush_input
+    self.max_tmp_size = max_tmp_size
+    self.init_line = init_line
 
-#input_str = 'stdin-conll'
-#input_str = 'stdin'
 
 task_context_file = '/root/models/syntaxnet/syntaxnet/models/parsey_universal/context.pbtxt'
 resource_dir = '/root/models/syntaxnet/syntaxnet/models/Russian-SynTagRus'
-custom_file_dir = '/root/models/syntaxnet/bazel-bin/syntaxnet/parser_eval.runfiles/__main__/syntaxnet/api/'
+custom_file_dir = '/dev/shm/'
 
 
 CFG_MORPH_PARSER = ProcessorSyntaxNetConfig(
@@ -123,7 +125,9 @@ CFG_MORPH_PARSER = ProcessorSyntaxNetConfig(
   custom_file_path = os.path.join(custom_file_dir, 'morpher.tmp'),
   input_str = 'custom_file_morpher',
   variable_scope = 'morpher',
-  flush_input = True)
+  flush_input = True,
+  max_tmp_size = 524288000,
+  init_line = '1')
 
 
 CFG_MORPH_TAGGER = ProcessorSyntaxNetConfig(
@@ -139,7 +143,9 @@ CFG_MORPH_TAGGER = ProcessorSyntaxNetConfig(
 
   custom_file_path = os.path.join(custom_file_dir, 'tagger.tmp'),
   input_str = 'custom_file_tagger',
-  variable_scope = 'tagger')
+  variable_scope = 'tagger',
+  max_tmp_size = 524288000,
+  init_line = '1\t'*10)
 
 
 CFG_SYNTAX_PARSER = ProcessorSyntaxNetConfig(
@@ -155,7 +161,9 @@ CFG_SYNTAX_PARSER = ProcessorSyntaxNetConfig(
 
   custom_file_path = os.path.join(custom_file_dir, 'parser.tmp'),
   input_str = 'custom_file_parser',
-  variable_scope = 'synt_parser')
+  variable_scope = 'synt_parser',
+  max_tmp_size = 524288000,
+  init_line = '1\t'*12)
 
 
 def RewriteContext(task_context_file):
@@ -186,6 +194,8 @@ class ProcessorSyntaxNet(object):
     with open(self.cfg_.custom_file_path, 'w') as f:
       pass
 
+    self.fdescr_ = open(self.cfg_.custom_file_path, 'r')
+
     hidden_layer_sizes = map(int, self.cfg_.hidden_layer_str.split(','))
 
     with tf.variable_scope(self.cfg_.variable_scope):
@@ -215,10 +225,10 @@ class ProcessorSyntaxNet(object):
 
       sys.stderr.flush()
 
-      #self.parse('1')
+      self.parse(self.cfg_.init_line)
 
   def parse(self, raw_bytes):
-    if self.cfg_.flush_input:
+    if self.cfg_.flush_input and self.fdescr_.tell() > self.cfg_.max_tmp_size:
       with open(self.cfg_.custom_file_path, 'w') as f:
         pass 
 
@@ -303,9 +313,7 @@ def configure_stdout():
 def main():
   import argparse
 
-  parser = argparse.ArgumentParser(description = 
-                                     'Syntaxnet server.')
-    
+  parser = argparse.ArgumentParser(description = 'Syntaxnet server.') 
   parser.add_argument('--host', 
                       required = True, 
                       help = 'Accepted hosts',

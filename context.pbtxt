@@ -364,20 +364,20 @@ input {
   name: 'custom_file_morpher'
   record_format: 'tokenized-text'
   Part {
-    file_pattern: '/root/models/syntaxnet/bazel-bin/syntaxnet/parser_eval.runfiles/__main__/syntaxnet/api/morpher.tmp'
+    file_pattern: '/dev/shm/morpher.tmp'
   }
 }
 input {
   name: 'custom_file_tagger'
   record_format: 'conll-sentence'
   Part {
-    file_pattern: '/root/models/syntaxnet/bazel-bin/syntaxnet/parser_eval.runfiles/__main__/syntaxnet/api/tagger.tmp'
+    file_pattern: '/dev/shm/tagger.tmp'
   }
 }
 input {
   name: 'custom_file_parser'
   record_format: 'conll-sentence'
   Part {
-    file_pattern: '/root/models/syntaxnet/bazel-bin/syntaxnet/parser_eval.runfiles/__main__/syntaxnet/api/parser.tmp'
+    file_pattern: '/dev/shm/parser.tmp'
   }
 }
