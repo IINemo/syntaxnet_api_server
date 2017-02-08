@@ -223,8 +223,6 @@ class ProcessorSyntaxNet(object):
       self.sess_.run(self.parser_.inits.values())
       self.parser_.saver.restore(self.sess_, self.cfg_.model_path)
 
-      sys.stderr.flush()
-
       self.parse(self.cfg_.init_line)
 
   def parse(self, raw_bytes):
@@ -233,14 +231,12 @@ class ProcessorSyntaxNet(object):
         pass 
 
       self._parse_impl()
-      sys.stdout.flush()
     
     with open(self.cfg_.custom_file_path, 'a') as f:
       f.write(raw_bytes)
       f.flush()
 
     self._parse_impl()
-    sys.stdout.flush()
 
     result = self._read_all_stream(self.read_stream_)
     return result
@@ -259,6 +255,7 @@ class ProcessorSyntaxNet(object):
                                           corpus_name='stdout-conll')
 
       self.sess_.run(sink, feed_dict={sink_documents: tf_documents})
+      sys.stdout.flush()
 
   def _read_all_stream(self, strm):
     result = str()
@@ -277,6 +274,7 @@ class SyncHandler(SocketServer.BaseRequestHandler):
   def handle(self):
     logger.debug('Incoming request.')
     data = self._read_incoming_request()
+    #data = self._read_all_from_socket(self.request)
 
     logger.debug('Morphological analysis...')
     morph_result = self.server.morpher_.parse(data)
@@ -294,12 +292,13 @@ class SyncHandler(SocketServer.BaseRequestHandler):
     self.request.sendall(result)
 
   def _read_incoming_request(self):
-    chunk = self.request.recv(1024)
     data = str()
-    data += chunk
-    while '\n' not in chunk:
+
+    while True:
       chunk = self.request.recv(1024)
       data += chunk
+      if '\n\n' in data:
+        break
 
     return data  
 
