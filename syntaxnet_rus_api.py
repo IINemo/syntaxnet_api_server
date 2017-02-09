@@ -69,6 +69,8 @@ from syntaxnet import structured_graph_builder
 from syntaxnet.ops import gen_parser_ops
 from syntaxnet import task_spec_pb2
 
+import select
+
 
 class ProcessorSyntaxNetConfig(object):
   def __init__(self, 
@@ -260,12 +262,14 @@ class ProcessorSyntaxNet(object):
 
   def _read_all_stream(self, strm):
     result = str()
+    while True: 
+      try:
+        chunk = os.read(strm.fileno(), 51200)
+        if not chunk:
+          break
 
-    max_read = 1024
-    while True:
-      chunk = os.read(strm.fileno(), max_read)
-      result += chunk
-      if len(chunk) < max_read:
+        result += chunk
+      except:
         break
 
     return result
@@ -295,7 +299,7 @@ class SyncHandler(SocketServer.BaseRequestHandler):
     data = str()
 
     while True:
-      chunk = self.request.recv(1024)
+      chunk = self.request.recv(51200)
       data += chunk
       if '\n\n' in data:
         break
@@ -304,8 +308,14 @@ class SyncHandler(SocketServer.BaseRequestHandler):
 
 
 def configure_stdout():
+  import fcntl
+
   read_stream, write_stream = os.pipe()
   os.dup2(write_stream, sys.stdout.fileno())
+
+  fl = fcntl.fcntl(read_stream, fcntl.F_GETFL)
+  fcntl.fcntl(read_stream, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
   return os.fdopen(read_stream)
 
 
