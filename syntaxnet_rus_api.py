@@ -239,7 +239,7 @@ class ProcessorSyntaxNet(object):
     self._parse_impl()
 
     result = self._read_all_stream(self.read_stream_)
-    return result
+    return result[:-1]
 
   def _parse_impl(self):
     with tf.variable_scope(self.cfg_.variable_scope):
@@ -255,6 +255,7 @@ class ProcessorSyntaxNet(object):
                                           corpus_name='stdout-conll')
 
       self.sess_.run(sink, feed_dict={sink_documents: tf_documents})
+      sys.stdout.write('\n')
       sys.stdout.flush()
 
   def _read_all_stream(self, strm):
@@ -274,7 +275,6 @@ class SyncHandler(SocketServer.BaseRequestHandler):
   def handle(self):
     logger.debug('Incoming request.')
     data = self._read_incoming_request()
-    #data = self._read_all_from_socket(self.request)
 
     logger.debug('Morphological analysis...')
     morph_result = self.server.morpher_.parse(data)
