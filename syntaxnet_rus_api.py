@@ -88,7 +88,7 @@ class ProcessorSyntaxNetConfig(object):
     variable_scope,
     init_line,
     flush_input = False,
-    max_tmp_size = 524288000):
+    max_tmp_size = 262144000):
 
     self.beam_size = beam_size
     self.max_steps = max_steps
@@ -128,7 +128,7 @@ CFG_MORPH_PARSER = ProcessorSyntaxNetConfig(
   input_str = 'custom_file_morpher',
   variable_scope = 'morpher',
   flush_input = True,
-  max_tmp_size = 524288000,
+  max_tmp_size = 262144000,
   init_line = '1')
 
 
@@ -146,7 +146,7 @@ CFG_MORPH_TAGGER = ProcessorSyntaxNetConfig(
   custom_file_path = os.path.join(custom_file_dir, 'tagger.tmp'),
   input_str = 'custom_file_tagger',
   variable_scope = 'tagger',
-  max_tmp_size = 524288000,
+  max_tmp_size = 262144000,
   init_line = '1\t'*10)
 
 
