@@ -1,11 +1,8 @@
 # -*- coding: utf8 -*-
 
 import sys
-
 import os
 import os.path
-
-import SocketServer
 
 ################################################################################
 
@@ -54,7 +51,6 @@ shutil.copyfile(custom_file_path, orig_file_path)
 
 ################################################################################
 
-import time
 import tempfile
 import tensorflow as tf
 
@@ -69,7 +65,7 @@ from syntaxnet import structured_graph_builder
 from syntaxnet.ops import gen_parser_ops
 from syntaxnet import task_spec_pb2
 
-import select
+import SocketServer
 
 
 class ProcessorSyntaxNetConfig(object):
@@ -111,6 +107,7 @@ class ProcessorSyntaxNetConfig(object):
 task_context_file = '/root/models/syntaxnet/syntaxnet/models/parsey_universal/context.pbtxt'
 resource_dir = '/root/models/syntaxnet/syntaxnet/models/Russian-SynTagRus'
 custom_file_dir = '/dev/shm/'
+stdout_file_path =  '/dev/shm/stdout.tmp'
 
 
 CFG_MORPH_PARSER = ProcessorSyntaxNetConfig(
@@ -129,6 +126,7 @@ CFG_MORPH_PARSER = ProcessorSyntaxNetConfig(
   variable_scope = 'morpher',
   flush_input = True,
   max_tmp_size = 262144000,
+  #max_tmp_size = 1,
   init_line = '1')
 
 
@@ -142,11 +140,13 @@ CFG_MORPH_TAGGER = ProcessorSyntaxNetConfig(
   model_path = os.path.join(resource_dir, 'tagger-params'),
   batch_size = 1024,
   hidden_layer_str = '64',
+  flush_input = True,
 
   custom_file_path = os.path.join(custom_file_dir, 'tagger.tmp'),
   input_str = 'custom_file_tagger',
   variable_scope = 'tagger',
   max_tmp_size = 262144000,
+  #max_tmp_size = 1,
   init_line = '1\t'*10)
 
 
@@ -160,11 +160,13 @@ CFG_SYNTAX_PARSER = ProcessorSyntaxNetConfig(
   model_path = os.path.join(resource_dir, 'parser-params'),
   batch_size = 1024,
   hidden_layer_str = '512,512',
+  flush_input = True,
 
   custom_file_path = os.path.join(custom_file_dir, 'parser.tmp'),
   input_str = 'custom_file_parser',
   variable_scope = 'synt_parser',
-  max_tmp_size = 524288000,
+  max_tmp_size = 262144000,
+  #max_tmp_size = 1,
   init_line = '1\t'*12)
 
 
@@ -184,12 +186,11 @@ def RewriteContext(task_context_file):
 
 
 class ProcessorSyntaxNet(object):
-  def __init__(self, cfg, read_stream):
+  def __init__(self, cfg):
     super(ProcessorSyntaxNet, self).__init__()
 
     self.parser_ = None
     self.task_context_ = RewriteContext(task_context_file)
-    self.read_stream_ = read_stream
     self.sess_ = tf.Session()
     self.cfg_ = cfg
 
@@ -228,11 +229,15 @@ class ProcessorSyntaxNet(object):
       self.parse(self.cfg_.init_line)
 
   def parse(self, raw_bytes):
-    if self.cfg_.flush_input and self.fdescr_.tell() > self.cfg_.max_tmp_size:
+    if self.cfg_.flush_input and os.stat(self.cfg_.custom_file_path).st_size > self.cfg_.max_tmp_size:
+      logger.debug('Cleaning input file.')
       with open(self.cfg_.custom_file_path, 'w') as f:
-        pass 
+        pass
+      logger.debug('Done.') 
 
+      logger.debug('Reseting offset inside tensorflow input file class.')
       self._parse_impl()
+      logger.debug('Done.')
     
     with open(self.cfg_.custom_file_path, 'a') as f:
       f.write(raw_bytes)
@@ -240,8 +245,8 @@ class ProcessorSyntaxNet(object):
 
     self._parse_impl()
 
-    result = self._read_all_stream(self.read_stream_)
-    return result[:-1]
+    result = self._read_all_stream()
+    return result
 
   def _parse_impl(self):
     with tf.variable_scope(self.cfg_.variable_scope):
@@ -250,28 +255,26 @@ class ProcessorSyntaxNet(object):
             self.parser_.evaluation['eval_metrics'],
             self.parser_.evaluation['documents']
        ])
-
+      
       sink_documents = tf.placeholder(tf.string)
       sink = gen_parser_ops.document_sink(sink_documents,
                                           task_context=self.task_context_,
                                           corpus_name='stdout-conll')
 
       self.sess_.run(sink, feed_dict={sink_documents: tf_documents})
+
       sys.stdout.write('\n')
       sys.stdout.flush()
 
-  def _read_all_stream(self, strm):
-    result = str()
-    while True: 
-      try:
-        chunk = os.read(strm.fileno(), 51200)
-        if not chunk:
-          break
-
-        result += chunk
-      except:
-        break
-
+  def _read_all_stream(self):
+    with open(stdout_file_path, 'r') as f:
+      result = f.read()
+    
+    os.ftruncate(sys.stdout.fileno(), 0)
+    os.lseek(sys.stdout.fileno(), 0, 0)
+    sys.stdout.flush()
+    
+    result = result[:-1]
     return result
 
 
@@ -308,15 +311,10 @@ class SyncHandler(SocketServer.BaseRequestHandler):
 
 
 def configure_stdout():
-  import fcntl
+  strm = open(stdout_file_path, 'w') # bypassing linux 64 kb pipe limit
+  os.dup2(strm.fileno(), sys.stdout.fileno())
 
-  read_stream, write_stream = os.pipe()
-  os.dup2(write_stream, sys.stdout.fileno())
-
-  fl = fcntl.fcntl(read_stream, fcntl.F_GETFL)
-  fcntl.fcntl(read_stream, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-
-  return os.fdopen(read_stream)
+  return strm
 
 
 def main():
@@ -337,9 +335,9 @@ def main():
 
   sync_server = SocketServer.TCPServer((args.host, int(args.port)), SyncHandler)
   stdout_strm = configure_stdout()
-  sync_server.morpher_ = ProcessorSyntaxNet(CFG_MORPH_PARSER, stdout_strm)
-  sync_server.tagger_ = ProcessorSyntaxNet(CFG_MORPH_TAGGER, stdout_strm)
-  sync_server.parser_ = ProcessorSyntaxNet(CFG_SYNTAX_PARSER, stdout_strm)
+  sync_server.morpher_ = ProcessorSyntaxNet(CFG_MORPH_PARSER)
+  sync_server.tagger_ = ProcessorSyntaxNet(CFG_MORPH_TAGGER)
+  sync_server.parser_ = ProcessorSyntaxNet(CFG_SYNTAX_PARSER)
   sync_server.serve_forever()  
 
 
