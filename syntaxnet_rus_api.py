@@ -296,6 +296,10 @@ class SyncHandler(SocketServer.BaseRequestHandler):
     logger.debug('Done.')
 
     result = parsing_result
+    
+    while not result.endswith('\n\n\n'):
+      result += '\n'
+
     self.request.sendall(result)
 
   def _read_incoming_request(self):
