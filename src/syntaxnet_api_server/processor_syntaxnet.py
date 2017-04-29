@@ -28,7 +28,6 @@ class ProcessorSyntaxNetConfig(object):
     variable_scope,
     init_line,
     stdout_file_path,
-    task_context_file,
     flush_input = False,
     max_tmp_size = 262144000):
 
@@ -47,7 +46,6 @@ class ProcessorSyntaxNetConfig(object):
     self.variable_scope = variable_scope
     self.flush_input = flush_input
     self.stdout_file_path = stdout_file_path
-    self.task_context_file = task_context_file
     self.max_tmp_size = max_tmp_size
     self.init_line = init_line
 
