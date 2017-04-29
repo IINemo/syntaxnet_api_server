@@ -50,7 +50,7 @@ class ProcessorSyntaxNetConfig(object):
     self.init_line = init_line
 
 
-def RewriteContext(task_context_file):
+def RewriteContext(task_context_file, resource_dir):
   context = task_spec_pb2.TaskSpec()
   with gfile.FastGFile(task_context_file) as fin:
     text_format.Merge(fin.read(), context)
@@ -71,7 +71,8 @@ class ProcessorSyntaxNet(object):
 
     self.cfg_ = cfg
     self.parser_ = None
-    self.task_context_ = RewriteContext(self.cfg_.task_context_file)
+    self.task_context_ = RewriteContext(self.cfg_.task_context_file,
+                                        self.cfg_.resource_dir)
     self.sess_ = tf.Session()
 
     with open(self.cfg_.custom_file_path, 'w') as f:
@@ -147,7 +148,7 @@ class ProcessorSyntaxNet(object):
       sys.stdout.flush()
 
   def _read_all_stream(self):
-    with open(self.cfg_.stdout_file_path_, 'r') as f:
+    with open(self.cfg_.stdout_file_path, 'r') as f:
       result = f.read()
     
     os.ftruncate(sys.stdout.fileno(), 0)
