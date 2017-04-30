@@ -110,6 +110,9 @@ class ProcessorSyntaxNet(object):
       self.parse(self.cfg_.init_line)
 
   def parse(self, raw_bytes):
+    if not raw_bytes:
+      return ''
+
     if self.cfg_.flush_input and os.stat(self.cfg_.custom_file_path).st_size > self.cfg_.max_tmp_size:
       logger.debug('Cleaning input file.')
       with open(self.cfg_.custom_file_path, 'w') as f:
